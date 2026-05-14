@@ -100,6 +100,10 @@ module SpnlRouter
       module #{target_module}
         def self.dispatch(path)
           c = #{controller_name}.new
+          # action が render_xxx 内で @site_name 等を参照する前に
+          # set_chrome を空 default で先に呼んで ivar を確定させる.
+          # (Spinel は nil ivar アクセスで segfault するため必須)
+          c.set_chrome("", "")
           body = ""
           nav  = ""
           case path
