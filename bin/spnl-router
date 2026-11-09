@@ -1,49 +1,19 @@
 #!/usr/bin/env ruby
-# Usage:
-#   spnl-router <controller.rb>            -> router.generated.rb to stdout
-#   spnl-router <controller.rb> -o FILE
-#   spnl-router <controller.rb> --module-name MyRouter
-require_relative "../lib/spnl_router"
-
-if ARGV.empty? || ARGV.include?("-h")
-  puts <<~U
-    spnl-router v#{SpnlRouter::VERSION}
-
-    Usage:
-      spnl-router <controller.rb>              print dispatcher to stdout
-      spnl-router <controller.rb> -o FILE      write to file
-      spnl-router <controller.rb> --module-name NAME   default: Router
-
-    Input must contain:
-      class XxxController
-        ROUTES = {
-          "/path"  => :action_name,
-          "/p/:id" => :action_with_param
-        }
-        def action_name; ...; end
-      end
-  U
-  exit 0
+require 'optparse'
+require_relative '../lib/spnl_router'
+opts={target_module:'Router',layout:true};output=nil
+parser=OptionParser.new do |o|
+  o.banner='Usage: spnl-router CONTROLLER.rb [-o FILE] [--module-name NAME] [--no-layout]'
+  o.on('-o FILE') { |v| output=v }
+  o.on('--module-name NAME') { |v| opts[:target_module]=v }
+  o.on('--no-layout') { opts[:layout]=false }
+  o.on('-h','--help') { puts o;exit }
 end
-
-input = ARGV.shift
-mod   = "Router"
-out   = nil
-while (opt = ARGV.shift)
-  case opt
-  when "-o"             then out = ARGV.shift
-  when "--module-name"  then mod = ARGV.shift
-  else
-    warn "spnl-router: unknown option #{opt}"; exit 1
-  end
-end
-
-src    = File.read(input)
-result = SpnlRouter.generate(src, target_module: mod)
-
-if out
-  File.write(out, result)
-  puts "wrote #{out}"
-else
-  print result
+begin
+  parser.parse!
+  raise ArgumentError,'expected one controller' unless ARGV.length==1
+  code=SpnlRouter.generate(File.read(ARGV[0]),**opts)
+  output ? File.write(output,code) : print(code)
+rescue ArgumentError,OptionParser::ParseError,Errno::ENOENT => e
+  warn "spnl-router: #{e.message}";exit 1
 end

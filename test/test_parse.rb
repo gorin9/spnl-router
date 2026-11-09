@@ -1,66 +1,30 @@
-#!/usr/bin/env ruby
-require_relative "../lib/spnl_router"
-
-def assert(cond, msg)
-  unless cond
-    warn "FAIL: #{msg}"; exit 1
-  end
+require_relative '../lib/spnl_router'
+def assert(x,m); raise m unless x; end
+class SampleController
+  ROUTES = {'/' => :home, '/users/:id' => :user, '/posts/:id' => :post, 'POST /users' => :create}
+  def set_chrome(nav,body); @body=body; end
+  def render_layout; @body; end
+  def home; ''; end
+  def user(id); "user:#{id}"; end
+  def post(id); "post:#{id}"; end
+  def create; 'created'; end
 end
-
-# --- static routes only ---
-src = <<~RB
-  class FooController
-    ROUTES = {
-      "/"      => :index,
-      "/about" => :about
-    }
-    def index; end
-    def about; end
-  end
-RB
-
-name, routes = SpnlRouter.parse(src)
-assert name == "FooController",      "class name"
-assert routes.length == 2,            "two routes"
-assert routes[0].path == "/",         "first path"
-assert routes[0].action == :index,    "first action"
-assert routes[0].param_name.nil?,     "no param"
-
-# --- param route ---
-src = <<~RB
-  class B
-    ROUTES = { "/posts/:id" => :show }
-    def show(id); end
-  end
-RB
-
-name, routes = SpnlRouter.parse(src)
-assert routes[0].path == "/posts/",    "stripped path"
-assert routes[0].param_name == "id",   "param name"
-assert routes[0].param_offset == 7,    "param offset"
-
-# --- generate output structure ---
-out = SpnlRouter.generate(src)
-assert out.include?("module Router"),          "module wrapper"
-assert out.include?("c = B.new"),              "controller instantiation"
-assert out.include?("path.start_with?(\"/posts/\")"), "param branch"
-assert out.include?("c.show(id)"),             "action call with param"
-
-# --- multi-mix ---
-src = <<~RB
-  class C
-    ROUTES = {
-      "/"          => :home,
-      "/api"       => :api,
-      "/users/:id" => :user_show,
-      "/posts/:id" => :post_show
-    }
-  end
-RB
-name, routes = SpnlRouter.parse(src)
-assert routes.length == 4, "four routes"
-out = SpnlRouter.generate(src)
-assert out.include?("when \"/api\""),                "static path"
-assert out.scan(/path\.start_with\?/).length == 2,   "two param branches"
-
-puts "all tests passed"
+src = File.read(__FILE__)
+name, routes=SpnlRouter.parse(src)
+assert(name=='SampleController' && routes.length==4, 'AST parse')
+eval(SpnlRouter.generate(src, target_module:'Generated'))
+assert(Generated.dispatch_result('GET','/')[0]==200,'empty body')
+assert(Generated.dispatch('/users/42?x=1')=='user:42','query')
+assert(Generated.dispatch('/posts/3')=='post:3','multiple param routes')
+assert(Generated.dispatch_result('GET','/posts/abc')[0]==404,'numeric id')
+assert(Generated.dispatch_result('GET','/posts/1/extra')[0]==404,'segment boundary')
+assert(Generated.dispatch_result('DELETE','/users')[0]==405,'405')
+assert(Generated.dispatch_result('POST','/users')[1]=='created','POST')
+assert(Generated.dispatch_result('HEAD','/users/42')[0]==200,'HEAD')
+only='class Only; ROUTES = {"/posts/:id" => :post}; end'
+RubyVM::InstructionSequence.compile(SpnlRouter.generate(only))
+begin
+  SpnlRouter.parse('class Evil; ROUTES = system("false"); end'); raise 'accepted code'
+rescue ArgumentError
+end
+puts 'route AST, generated execution, methods, boundaries and empty response passed'
